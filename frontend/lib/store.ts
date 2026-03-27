@@ -50,6 +50,38 @@ export interface PendingApproval {
   status: string;
 }
 
+export interface ClarificationPrompt {
+  type: "repo_selection" | "other";
+  originalPrompt: string;
+  runId: string;
+  message: string;
+}
+
+/** State for an in-progress provider reconnect triggered from a run page. */
+export interface ProviderRecoveryState {
+  /** The run that is waiting for the connection. */
+  runId: string;
+  /** Logical provider key: 'github' | 'google' | 'slack' */
+  provider: string;
+  /** Step that failed and needs to be retried. */
+  stepId: string;
+  stepKey: string;
+  /**
+   * UI phase:
+   *  missing_provider     — action_required event received, prompt shown
+   *  connecting_provider  — user clicked Connect, redirect in progress
+   *  connection_restored  — callback returned success, about to resume
+   *  resuming_step        — POST /resume sent, waiting for executor
+   *  resume_failed        — resume call failed
+   */
+  phase:
+    | "missing_provider"
+    | "connecting_provider"
+    | "connection_restored"
+    | "resuming_step"
+    | "resume_failed";
+}
+
 interface AppState {
   // User
   currentUser: UserProfile | null;
@@ -77,6 +109,15 @@ interface AppState {
   // Runs history
   runs: WorkflowRun[];
   setRuns: (runs: WorkflowRun[]) => void;
+
+  // Clarification prompts (e.g., repo selection needed)
+  clarification: ClarificationPrompt | null;
+  setClarification: (clarification: ClarificationPrompt | null) => void;
+
+  // Provider recovery (in-run connect flow)
+  providerRecovery: ProviderRecoveryState | null;
+  setProviderRecovery: (state: ProviderRecoveryState | null) => void;
+  updateProviderRecoveryPhase: (phase: ProviderRecoveryState["phase"]) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -111,4 +152,16 @@ export const useAppStore = create<AppState>((set) => ({
 
   runs: [],
   setRuns: (runs) => set({ runs }),
+
+  clarification: null,
+  setClarification: (clarification) => set({ clarification }),
+
+  providerRecovery: null,
+  setProviderRecovery: (state) => set({ providerRecovery: state }),
+  updateProviderRecoveryPhase: (phase) =>
+    set((state) =>
+      state.providerRecovery
+        ? { providerRecovery: { ...state.providerRecovery, phase } }
+        : {}
+    ),
 }));

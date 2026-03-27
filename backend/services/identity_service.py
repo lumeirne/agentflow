@@ -7,6 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.identity_mapping import IdentityMapping
 from backend.services.slack_service import slack_service
+from backend.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class IdentityService:
@@ -15,24 +18,40 @@ class IdentityService:
 
     async def resolve_github_to_email(self, user_id: str, github_username: str) -> str | None:
         """Look up email for a GitHub username. Returns None if unresolved."""
+        logger.info(
+            "Resolving GitHub username to email",
+            extra={"data": {"user_id": user_id, "github_username": github_username}},
+        )
         result = await self.db.execute(
             select(IdentityMapping).where(
-                IdentityMapping.user_id == user_id,
-                IdentityMapping.github_username == github_username,
+                (IdentityMapping.user_id == user_id) &
+                (IdentityMapping.github_username == github_username)
             )
         )
         mapping = result.scalar_one_or_none()
+        logger.info(
+            "Resolved GitHub username to email result",
+            extra={"data": {"user_id": user_id, "github_username": github_username, "resolved": bool(mapping and mapping.email)}},
+        )
         return mapping.email if mapping else None
 
     async def resolve_github_to_slack(self, user_id: str, github_username: str) -> str | None:
         """Look up Slack user ID for a GitHub username. Returns None if unresolved."""
+        logger.info(
+            "Resolving GitHub username to Slack user",
+            extra={"data": {"user_id": user_id, "github_username": github_username}},
+        )
         result = await self.db.execute(
             select(IdentityMapping).where(
-                IdentityMapping.user_id == user_id,
-                IdentityMapping.github_username == github_username,
+                (IdentityMapping.user_id == user_id) &
+                (IdentityMapping.github_username == github_username)
             )
         )
         mapping = result.scalar_one_or_none()
+        logger.info(
+            "Resolved GitHub username to Slack result",
+            extra={"data": {"user_id": user_id, "github_username": github_username, "resolved": bool(mapping and mapping.slack_user_id)}},
+        )
         return mapping.slack_user_id if mapping else None
 
     async def save_mapping(
@@ -45,10 +64,14 @@ class IdentityService:
         confidence_score: float = 1.0,
     ) -> IdentityMapping:
         """Persist a new identity mapping (or update if exists)."""
+        logger.info(
+            "Saving identity mapping",
+            extra={"data": {"user_id": user_id, "github_username": github_username}},
+        )
         result = await self.db.execute(
             select(IdentityMapping).where(
-                IdentityMapping.user_id == user_id,
-                IdentityMapping.github_username == github_username,
+                (IdentityMapping.user_id == user_id) &
+                (IdentityMapping.github_username == github_username)
             )
         )
         mapping = result.scalar_one_or_none()
@@ -69,21 +92,27 @@ class IdentityService:
         mapping.confidence_score = confidence_score
 
         await self.db.flush()
+        logger.info(
+            "Identity mapping saved",
+            extra={"data": {"user_id": user_id, "github_username": github_username, "mapping_id": mapping.id}},
+        )
         return mapping
 
     async def get_unresolved(self, user_id: str, usernames: list[str]) -> list[str]:
         """Return GitHub usernames that have no identity mapping for this user."""
+        logger.info("Finding unresolved usernames", extra={"data": {"user_id": user_id, "count": len(usernames)}})
         unresolved = []
         for username in usernames:
             result = await self.db.execute(
                 select(IdentityMapping).where(
-                    IdentityMapping.user_id == user_id,
-                    IdentityMapping.github_username == username,
+                    (IdentityMapping.user_id == user_id) &
+                    (IdentityMapping.github_username == username)
                 )
             )
             mapping = result.scalar_one_or_none()
             if mapping is None or (mapping.email is None and mapping.slack_user_id is None):
                 unresolved.append(username)
+        logger.info("Unresolved usernames computed", extra={"data": {"user_id": user_id, "unresolved_count": len(unresolved)}})
         return unresolved
 
     async def fuzzy_match_slack(
@@ -95,7 +124,11 @@ class IdentityService:
         """
         try:
             members = await slack_service.get_channel_members(user_id, channel_id)
-        except Exception:
+        except Exception as e:
+            logger.warning(
+                "Failed to fetch Slack members for fuzzy match",
+                extra={"data": {"user_id": user_id, "channel_id": channel_id, "error": str(e)}},
+            )
             return None
 
         best_match = None
@@ -112,9 +145,17 @@ class IdentityService:
                     best_match = member
 
         if best_match:
+            logger.info(
+                "Fuzzy Slack match found",
+                extra={"data": {"user_id": user_id, "github_username": github_username, "score": best_score}},
+            )
             return {
                 "slack_user_id": best_match["id"],
                 "display_name": best_match.get("real_name", best_match.get("name", "")),
                 "confidence_score": best_score,
             }
+        logger.info(
+            "No fuzzy Slack match found",
+            extra={"data": {"user_id": user_id, "github_username": github_username}},
+        )
         return None

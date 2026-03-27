@@ -1,20 +1,54 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { apiPost, apiGet } from "@/lib/auth";
 import { useAppStore, WorkflowRun } from "@/lib/store";
 import { SAMPLE_PROMPTS } from "@/lib/sample_prompts";
+import RepoSelector from "@/components/RepoSelector";
 
 export default function CommandConsole() {
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showRepoSelector, setShowRepoSelector] = useState(false);
+  const [lastFailedPrompt, setLastFailedPrompt] = useState<string | null>(null);
   const router = useRouter();
-  const { runs, setRuns } = useAppStore();
+  const searchParams = useSearchParams();
+  const { runs, setRuns, connectedServices } = useAppStore();
+  const githubConnected = connectedServices.some(
+    (service) => service.provider === "github" && service.status === "connected"
+  );
+
+  // Check if we received a repo selection from RepoSelector
+  useEffect(() => {
+    const selectedRepo = searchParams.get("selectedRepo");
+    if (selectedRepo) {
+      setPrompt(selectedRepo);
+      // Clear the URL parameter
+      window.history.replaceState({}, "", "/");
+    }
+  }, [searchParams]);
 
   const handleSubmit = async (text: string) => {
     if (!text.trim()) return;
+
+    // Check if text mentions GitHub actions but is missing repo specifics
+    const githubKeywords = ["pr", "pull request", "github", "repo", "repository", "commit", "branch"];
+    const mentionsGitHub = githubKeywords.some(keyword => text.toLowerCase().includes(keyword));
+    
+    const repoSpecified = 
+      text.includes("/") || // Full repo path like "owner/repo"
+      text.match(/repo[:\s]+\w+\/\w+/) || // "repo: owner/repo"
+      text.match(/repository[:\s]+\w+\/\w+/); // "repository: owner/repo"
+
+    // If mentions GitHub but no repo specified, open repo selector immediately
+    if (mentionsGitHub && !repoSpecified) {
+      setLastFailedPrompt(text.trim());
+      setShowRepoSelector(true);
+      return; // Don't send to backend yet
+    }
+
     setLoading(true);
     setError(null);
 
@@ -22,14 +56,44 @@ export default function CommandConsole() {
       const run = await apiPost<WorkflowRun>("/api/runs", { prompt: text.trim() });
       router.push(`/runs/${run.id}`);
     } catch (err: any) {
-      setError(err.message || "Failed to create run");
+      const msg: string = err?.message || "Failed to create run";
+      // Show repo selector if the agent signals it needs a repository clarification
+      if (
+        msg.toLowerCase().includes("clarification_needed") ||
+        msg.toLowerCase().includes("which repository") ||
+        msg.toLowerCase().includes("repository:")
+      ) {
+        setLastFailedPrompt(text.trim());
+        setShowRepoSelector(true);
+      } else {
+        setError(msg);
+      }
     } finally {
       setLoading(false);
     }
   };
 
+  const handleSelectRepo = (newPrompt: string) => {
+    setShowRepoSelector(false);
+    setPrompt(newPrompt);
+    // Auto-submit with the new prompt
+    handleSubmit(newPrompt);
+  };
+
   return (
     <div className="max-w-4xl mx-auto">
+      {/* Repo Selector Modal */}
+      <RepoSelector
+        isOpen={showRepoSelector}
+        originalPrompt={lastFailedPrompt || ""}
+        githubConnected={githubConnected}
+        onClose={() => {
+          setShowRepoSelector(false);
+          setLastFailedPrompt(null);
+        }}
+        onSelectRepo={handleSelectRepo}
+      />
+
       {/* Hero */}
       <div className="text-center mb-12">
         <h1 className="text-5xl font-bold mb-4 bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">

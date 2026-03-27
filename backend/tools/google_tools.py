@@ -1,7 +1,18 @@
-"""Google Calendar + Gmail tool functions — used by the LangGraph agent executor node."""
+"""Google Calendar + Gmail tool functions — used by the LangGraph agent executor node.
+
+Typed provider errors are propagated unchanged so the executor can branch on recoverability.
+"""
 
 from backend.services.google_service import google_service
 from backend.services.scheduling_service import propose_slots, SlotProposal
+# Re-export typed errors so callers can import from one place
+from backend.auth.token_vault import (  # noqa: F401
+    ProviderConnectionMissingError,
+    ProviderTokenExpiredError,
+    ProviderTokenExchangeError,
+    ProviderTemporaryError,
+    ProviderError,
+)
 
 
 async def calendar_check_freebusy(
@@ -27,7 +38,6 @@ async def calendar_propose_slots(
     working_start = time(int(start_parts[0]), int(start_parts[1]))
     working_end = time(int(end_parts[0]), int(end_parts[1]))
 
-    # Extract busy periods per calendar from Google's freebusy response
     calendars = freebusy_data.get("calendars", {})
     freebusy = {}
     for email, cal_data in calendars.items():

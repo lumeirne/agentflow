@@ -5,6 +5,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.user_settings import UserSettings
 from backend.schemas import SettingsRequest
+from backend.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class SettingsService:
@@ -13,6 +16,7 @@ class SettingsService:
 
     async def get_settings(self, user_id: str) -> UserSettings:
         """Return user settings, creating a record with system defaults if none exists."""
+        logger.info("Fetching user settings", extra={"data": {"user_id": user_id}})
         result = await self.db.execute(
             select(UserSettings).where(UserSettings.user_id == user_id)
         )
@@ -22,11 +26,13 @@ class SettingsService:
             settings = UserSettings(user_id=user_id)
             self.db.add(settings)
             await self.db.flush()
+            logger.info("Created default user settings", extra={"data": {"user_id": user_id}})
 
         return settings
 
     async def upsert_settings(self, user_id: str, data: SettingsRequest) -> UserSettings:
         """Create or update user settings."""
+        logger.info("Upserting user settings", extra={"data": {"user_id": user_id}})
         result = await self.db.execute(
             select(UserSettings).where(UserSettings.user_id == user_id)
         )
@@ -44,4 +50,5 @@ class SettingsService:
         settings.fallback_team_json = data.fallback_team_json
 
         await self.db.flush()
+        logger.info("User settings persisted", extra={"data": {"user_id": user_id}})
         return settings

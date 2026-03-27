@@ -18,6 +18,8 @@ class WorkflowRun(Base):
     parsed_intent_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String, nullable=False, default="created")
     result_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resume_step_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    waiting_provider: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )

@@ -93,11 +93,14 @@ async def executor_node(state: AgentState) -> dict:
             "approval_status": "pending",
         }
 
-    # Low risk — execute directly
+    # Low risk — execute directly; let ProviderError propagate unchanged
     try:
         result = await _execute_tool(step, state.get("user_id", ""), tool_results)
         tool_results[step.step_key] = {"status": "completed", "data": result}
     except Exception as e:
+        from backend.auth.token_vault import ProviderError
+        if isinstance(e, ProviderError):
+            raise  # propagate typed provider errors to executor
         tool_results[step.step_key] = {"status": "failed", "error": str(e)}
 
     return {
@@ -133,6 +136,9 @@ async def human_approval_node(state: AgentState) -> dict:
             result = await _execute_tool(step, state.get("user_id", ""), tool_results)
             tool_results[step.step_key] = {"status": "completed", "data": result}
         except Exception as e:
+            from backend.auth.token_vault import ProviderError
+            if isinstance(e, ProviderError):
+                raise
             tool_results[step.step_key] = {"status": "failed", "error": str(e)}
 
         return {

@@ -1,6 +1,17 @@
-"""Slack tool functions — used by the LangGraph agent executor node."""
+"""Slack tool functions — used by the LangGraph agent executor node.
+
+Typed provider errors are propagated unchanged so the executor can branch on recoverability.
+"""
 
 from backend.services.slack_service import slack_service
+# Re-export typed errors so callers can import from one place
+from backend.auth.token_vault import (  # noqa: F401
+    ProviderConnectionMissingError,
+    ProviderTokenExpiredError,
+    ProviderTokenExchangeError,
+    ProviderTemporaryError,
+    ProviderError,
+)
 
 
 async def slack_get_channel_members(user_id: str, channel_id: str) -> list[dict]:

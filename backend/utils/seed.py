@@ -9,15 +9,18 @@ from backend.models.user import User
 from backend.models.connected_account import ConnectedAccount
 from backend.models.workflow_run import WorkflowRun
 from backend.schemas import RunStatus
+from backend.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 async def seed_demo_data():
     """Seeds the local SQLite database with initial demo data."""
-    print("Dropping and recreating tables...")
+    logger.info("Dropping and recreating tables")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
         
-    print("Inserting seed data...")
+    logger.info("Inserting seed data")
     async with async_session_factory() as db:
         # Create user
         demo_user = User(
@@ -64,7 +67,7 @@ async def seed_demo_data():
         db.add(recent_run)
         
         await db.commit()
-    print("Seed data inserted successfully!")
+    logger.info("Seed data inserted successfully")
 
 if __name__ == "__main__":
     asyncio.run(seed_demo_data())

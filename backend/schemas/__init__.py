@@ -42,6 +42,7 @@ class RunStatus(str, Enum):
     PLANNING = "planning"
     RUNNING = "running"
     WAITING_FOR_APPROVAL = "waiting_for_approval"
+    WAITING_FOR_CONNECTION = "waiting_for_connection"
     PARTIALLY_COMPLETED = "partially_completed"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -53,6 +54,7 @@ class StepStatus(str, Enum):
     AWAITING_APPROVAL = "awaiting_approval"
     COMPLETED = "completed"
     FAILED = "failed"
+    FAILED_RECOVERABLE = "failed_recoverable"
     SKIPPED = "skipped"
 
 
@@ -209,9 +211,23 @@ class SettingsResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# --- GitHub Repos ---
+class GitHubRepoResponse(BaseModel):
+    name: str
+    full_name: str
+    description: str | None = None
+    url: str
+    updated_at: str
+
+
+class GitHubReposResponse(BaseModel):
+    repos: list[GitHubRepoResponse]
+    total: int
+
+
 # --- WebSocket Events ---
 class WSEvent(BaseModel):
-    event: str  # 'step_update' | 'approval_required' | 'run_complete' | 'error'
+    event: str  # 'step_update' | 'approval_required' | 'provider_action_required' | 'run_complete' | 'error'
     run_id: str
     step_id: str | None = None
     status: str | None = None
