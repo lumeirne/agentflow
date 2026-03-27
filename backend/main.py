@@ -58,6 +58,26 @@ async def health():
     return HealthResponse()
 
 
+@app.get("/api/health/auth0", tags=["health"])
+async def health_auth0():
+    """
+    Validate Auth0 tenant prerequisites for Token Vault operation.
+    Returns warnings if Management API, MRRT, or Token Vault grants are not reachable.
+    """
+    from backend.auth.token_vault import token_vault_client
+    warnings = []
+    try:
+        await token_vault_client.get_management_token()
+    except Exception as e:
+        warnings.append(f"Auth0 Management API unreachable: {e}")
+
+    return {
+        "status": "ok" if not warnings else "degraded",
+        "warnings": warnings,
+        "token_source": "auth0_token_vault",
+    }
+
+
 # ── WebSocket endpoint ──
 from backend.websocket.manager import ws_manager
 

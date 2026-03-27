@@ -10,7 +10,14 @@ import { useAppStore } from "@/lib/store";
  */
 export function useWebSocket(runId: string | null) {
   const wsRef = useRef<RunWebSocket | null>(null);
-  const { updateStep, addApproval, setActiveRun, activeRun } = useAppStore();
+  const {
+    updateStep,
+    addApproval,
+    setActiveRun,
+    activeRun,
+    setClarification,
+    setProviderRecovery,
+  } = useAppStore();
 
   const connect = useCallback(
     (id: string) => {
@@ -36,6 +43,25 @@ export function useWebSocket(runId: string | null) {
         });
       });
 
+      ws.onProviderActionRequired((event) => {
+        // Mark the step as failed_recoverable in local state
+        if (event.step_id) {
+          updateStep(event.step_id, { status: "failed_recoverable" });
+        }
+        // Update run status
+        if (activeRun && activeRun.id === event.run_id) {
+          setActiveRun({ ...activeRun, status: "waiting_for_connection" });
+        }
+        // Set provider recovery state so the run page can show the inline prompt
+        setProviderRecovery({
+          runId: event.run_id,
+          provider: event.data.provider,
+          stepId: event.data.step_id,
+          stepKey: event.data.step_key,
+          phase: "missing_provider",
+        });
+      });
+
       ws.onRunComplete((event) => {
         if (activeRun && activeRun.id === event.run_id) {
           setActiveRun({
@@ -47,13 +73,40 @@ export function useWebSocket(runId: string | null) {
       });
 
       ws.onError((event) => {
+        const errorMessage = event.data.message || "";
+
+        if (errorMessage.includes("clarification_needed")) {
+          if (errorMessage.includes("Which repository")) {
+            setClarification({
+              type: "repo_selection",
+              originalPrompt: activeRun?.prompt || "",
+              runId: event.run_id || "",
+              message: errorMessage,
+            });
+          }
+          return;
+        }
+
+        if (activeRun && activeRun.id === event.run_id) {
+          setActiveRun({
+            ...activeRun,
+            status: "failed",
+            result_summary: event.data.message,
+          });
+        }
         console.error("Run error:", event.data.message);
+      });
+
+      ws.onConnectionError((msg) => {
+        if (activeRun) {
+          setActiveRun({ ...activeRun, status: "failed", result_summary: msg });
+        }
       });
 
       ws.connect(id);
       wsRef.current = ws;
     },
-    [updateStep, addApproval, setActiveRun, activeRun]
+    [updateStep, addApproval, setActiveRun, activeRun, setClarification, setProviderRecovery]
   );
 
   useEffect(() => {

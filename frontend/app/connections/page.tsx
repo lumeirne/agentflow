@@ -1,18 +1,24 @@
 "use client";
 
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useState } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { apiGet, apiPost } from "@/lib/auth";
 import { useAppStore, ConnectedService } from "@/lib/store";
 import ServiceStatus from "@/components/ServiceStatus";
 
 export default function ConnectionsPage() {
   const { connectedServices, setConnectedServices } = useAppStore();
+  const [connectError, setConnectError] = useState<string | null>(null);
+  const [connectSuccess, setConnectSuccess] = useState<string | null>(null);
+  const [connectingProvider, setConnectingProvider] = useState<string | null>(null);
+  const searchParams = useSearchParams();
+  const router = useRouter();
 
   const fetchConnections = useCallback(async () => {
     try {
       const data = await apiGet<ConnectedService[]>("/api/connections");
       setConnectedServices(data);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to fetch connections:", err);
     }
   }, [setConnectedServices]);
@@ -21,12 +27,54 @@ export default function ConnectionsPage() {
     fetchConnections();
   }, [fetchConnections]);
 
+  // Read OAuth callback result from URL query params
+  useEffect(() => {
+    const connected = searchParams.get("connected");
+    const error = searchParams.get("error");
+    const resume = searchParams.get("resume");
+
+    if (connected) {
+      setConnectSuccess(`${connected.charAt(0).toUpperCase() + connected.slice(1)} connected successfully!`);
+      setTimeout(() => setConnectSuccess(null), 5000);
+      fetchConnections();
+
+      // If this connection was triggered from a run page, redirect back there
+      if (resume) {
+        router.replace(`/runs/${resume}?connected=${connected}&resume=${resume}`);
+        return;
+      }
+    }
+    if (error) {
+      setConnectError(decodeURIComponent(error));
+    }
+    if (connected || error) {
+      router.replace("/connections");
+    }
+  }, [searchParams, router, fetchConnections]);
+
   const handleConnect = async (provider: string) => {
+    setConnectError(null);
+    setConnectingProvider(provider);
     try {
-      const data = await apiPost<{ redirect_url: string }>(`/api/connections/${provider}/start`);
-      window.location.href = data.redirect_url;
-    } catch (err) {
-      console.error("Failed to start connection:", err);
+      const data = await apiPost<{ redirect_url: string }>(
+        `/api/connections/${provider}/start`
+      );
+      if (data.redirect_url) {
+        window.location.href = data.redirect_url;
+      } else {
+        setConnectError("No redirect URL returned. Check your Auth0 Token Vault configuration.");
+      }
+    } catch (err: any) {
+      const msg: string = err?.message || "Failed to start connection";
+      if (msg.includes("502") || msg.toLowerCase().includes("backend")) {
+        setConnectError(
+          "Cannot reach the backend server. Make sure it is running at localhost:8000."
+        );
+      } else {
+        setConnectError(msg);
+      }
+    } finally {
+      setConnectingProvider(null);
     }
   };
 
@@ -40,10 +88,36 @@ export default function ConnectionsPage() {
         </p>
       </div>
 
+      {/* Connection error banner */}
+      {connectError && (
+        <div className="mb-6 flex items-start gap-3 rounded-xl border border-red-500/30 bg-red-900/20 p-4">
+          <span className="text-red-400 text-lg flex-shrink-0">⚠️</span>
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-red-300">Connection failed</p>
+            <p className="text-xs text-red-400 mt-0.5">{connectError}</p>
+          </div>
+          <button
+            onClick={() => setConnectError(null)}
+            className="text-red-400 hover:text-red-200 text-sm flex-shrink-0"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* Connection success banner */}
+      {connectSuccess && (
+        <div className="mb-6 flex items-center gap-3 rounded-xl border border-emerald-500/30 bg-emerald-900/20 p-4">
+          <span className="text-emerald-400 text-lg">✅</span>
+          <p className="text-sm font-semibold text-emerald-300">{connectSuccess}</p>
+        </div>
+      )}
+
       <ServiceStatus
         services={connectedServices}
         onConnect={handleConnect}
         onRefresh={fetchConnections}
+        connectingProvider={connectingProvider}
       />
 
       {/* Permission Matrix */}

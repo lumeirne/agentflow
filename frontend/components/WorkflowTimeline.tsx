@@ -6,9 +6,11 @@ import ApprovalCard from "@/components/ApprovalCard";
 
 interface WorkflowTimelineProps {
   steps: WorkflowStep[];
+  recoverableProvider?: string;
+  onReconnect?: (provider: string) => void;
 }
 
-export default function WorkflowTimeline({ steps }: WorkflowTimelineProps) {
+export default function WorkflowTimeline({ steps, recoverableProvider, onReconnect }: WorkflowTimelineProps) {
   if (steps.length === 0) {
     return (
       <div className="text-center py-12 text-gray-500">
@@ -26,7 +28,11 @@ export default function WorkflowTimeline({ steps }: WorkflowTimelineProps) {
             <div className="absolute left-7 top-16 bottom-0 w-0.5 bg-white/10 -mb-3" />
           )}
 
-          <StepCard step={step} />
+          <StepCard
+            step={step}
+            recoverableProvider={step.status === "failed_recoverable" ? recoverableProvider : undefined}
+            onReconnect={onReconnect}
+          />
 
           {/* Inline approval card when step is awaiting approval */}
           {step.status === "awaiting_approval" && (

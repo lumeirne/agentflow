@@ -10,6 +10,9 @@ from backend.models.workflow_run import WorkflowRun
 from backend.models.workflow_step import WorkflowStep
 from backend.models.artifact import Artifact
 from backend.schemas import WorkflowPlan, RunStatus, StepStatus, ActionType, RiskTier
+from backend.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class WorkflowService:
@@ -18,6 +21,7 @@ class WorkflowService:
 
     async def create_run(self, user_id: str, prompt: str) -> WorkflowRun:
         """Create a new WorkflowRun record."""
+        logger.info("Creating workflow run", extra={"data": {"user_id": user_id, "prompt_length": len(prompt)}})
         run = WorkflowRun(
             user_id=user_id,
             prompt=prompt,
@@ -25,10 +29,12 @@ class WorkflowService:
         )
         self.db.add(run)
         await self.db.flush()
+        logger.info("Workflow run created", extra={"data": {"user_id": user_id, "run_id": run.id}})
         return run
 
     async def persist_plan(self, run_id: str, plan: WorkflowPlan) -> list[WorkflowStep]:
         """Store the parsed plan and create all WorkflowStep records (status=pending)."""
+        logger.info("Persisting workflow plan", extra={"data": {"run_id": run_id, "step_count": len(plan.steps)}})
         result = await self.db.execute(
             select(WorkflowRun).where(WorkflowRun.id == run_id)
         )
@@ -50,6 +56,7 @@ class WorkflowService:
             steps.append(step)
 
         await self.db.flush()
+        logger.info("Workflow plan persisted", extra={"data": {"run_id": run_id, "created_steps": len(steps)}})
         return steps
 
     async def update_step_status(
@@ -60,6 +67,7 @@ class WorkflowService:
         error_text: str | None = None,
     ) -> WorkflowStep:
         """Update a workflow step's status and optional output/error."""
+        logger.info("Updating step status", extra={"data": {"step_id": step_id, "status": status}})
         result = await self.db.execute(
             select(WorkflowStep).where(WorkflowStep.id == step_id)
         )
@@ -69,7 +77,8 @@ class WorkflowService:
         now = datetime.now(timezone.utc)
         if status == StepStatus.RUNNING.value:
             step.started_at = now
-        if status in (StepStatus.COMPLETED.value, StepStatus.FAILED.value, StepStatus.SKIPPED.value):
+        if status in (StepStatus.COMPLETED.value, StepStatus.FAILED.value,
+                      StepStatus.FAILED_RECOVERABLE.value, StepStatus.SKIPPED.value):
             step.completed_at = now
         if output_json is not None:
             step.output_json = output_json
@@ -81,6 +90,7 @@ class WorkflowService:
 
     async def update_run_status(self, run_id: str, status: str, result_summary: str | None = None):
         """Update the run's status and optional result summary."""
+        logger.info("Updating run status", extra={"data": {"run_id": run_id, "status": status}})
         result = await self.db.execute(
             select(WorkflowRun).where(WorkflowRun.id == run_id)
         )
@@ -95,8 +105,8 @@ class WorkflowService:
         """Fetch a run by ID, scoped to the requesting user."""
         result = await self.db.execute(
             select(WorkflowRun).where(
-                WorkflowRun.id == run_id,
-                WorkflowRun.user_id == user_id,
+                (WorkflowRun.id == run_id) &
+                (WorkflowRun.user_id == user_id)
             )
         )
         return result.scalar_one_or_none()
@@ -108,7 +118,9 @@ class WorkflowService:
             .where(WorkflowRun.user_id == user_id)
             .order_by(WorkflowRun.created_at.desc())
         )
-        return list(result.scalars().all())
+        runs = list(result.scalars().all())
+        logger.info("Listed user runs", extra={"data": {"user_id": user_id, "count": len(runs)}})
+        return runs
 
     async def get_run_steps(self, run_id: str) -> list[WorkflowStep]:
         """Get all steps for a given run."""
@@ -132,6 +144,10 @@ class WorkflowService:
         content_json: str,
     ) -> Artifact:
         """Create an artifact record."""
+        logger.info(
+            "Creating artifact",
+            extra={"data": {"run_id": run_id, "step_id": step_id, "artifact_type": artifact_type}},
+        )
         artifact = Artifact(
             run_id=run_id,
             step_id=step_id,
@@ -140,6 +156,7 @@ class WorkflowService:
         )
         self.db.add(artifact)
         await self.db.flush()
+        logger.info("Artifact created", extra={"data": {"artifact_id": artifact.id, "run_id": run_id}})
         return artifact
 
 def classify_risk_tier(action_type: ActionType | str) -> RiskTier:

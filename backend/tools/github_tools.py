@@ -1,6 +1,18 @@
-"""GitHub tool functions — used by the LangGraph agent executor node."""
+"""GitHub tool functions — used by the LangGraph agent executor node.
 
-from backend.services.github_service import github_service, TokenExpiredError
+Typed provider errors (ProviderConnectionMissingError, ProviderTokenExpiredError, etc.)
+are propagated unchanged so the executor can branch on recoverability.
+"""
+
+from backend.services.github_service import github_service
+# Re-export typed errors so callers can import from one place
+from backend.auth.token_vault import (  # noqa: F401
+    ProviderConnectionMissingError,
+    ProviderTokenExpiredError,
+    ProviderTokenExchangeError,
+    ProviderTemporaryError,
+    ProviderError,
+)
 
 
 async def github_get_latest_pr(user_id: str, repo: str) -> dict:

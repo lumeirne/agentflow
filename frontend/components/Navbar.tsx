@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 
 const NAV_ITEMS = [
   { path: "/",            label: "Console",     icon: "⚡" },
@@ -12,6 +13,27 @@ const NAV_ITEMS = [
 
 export default function Navbar() {
   const pathname = usePathname();
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    fetch("/api/auth/session", { cache: "no-store" })
+      .then((res) => {
+        if (isMounted) {
+          setIsAuthenticated(res.ok);
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setIsAuthenticated(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 backdrop-blur-xl bg-gray-950/80 border-b border-white/5">
@@ -28,7 +50,7 @@ export default function Navbar() {
           </Link>
 
           {/* Nav links */}
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-2">
             {NAV_ITEMS.map((item) => {
               const isActive = pathname === item.path;
               return (
@@ -46,6 +68,15 @@ export default function Navbar() {
                 </Link>
               );
             })}
+
+            {isAuthenticated !== null && (
+              <a
+                href={isAuthenticated ? "/api/auth/logout" : "/api/auth/login"}
+                className="ml-2 px-3 py-2 rounded-lg text-sm font-medium border border-white/10 text-gray-300 hover:text-white hover:border-white/25 hover:bg-white/5 transition-all duration-200"
+              >
+                {isAuthenticated ? "Sign out" : "Sign in"}
+              </a>
+            )}
           </div>
         </div>
       </div>
