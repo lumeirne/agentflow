@@ -71,10 +71,21 @@ class LLMService:
             if "error" in data:
                 error_msg = data.get("error", "Unknown error")
                 question = data.get("question", "")
-                if question:
-                    raise PlanParseError(f"{error_msg}: {question}")
-                else:
-                    raise PlanParseError(error_msg)
+                
+                # Only raise for truly blocking errors (missing repo)
+                if "repository" in question.lower():
+                    if question:
+                        raise PlanParseError(f"{error_msg}: {question}")
+                    else:
+                        raise PlanParseError(error_msg)
+                
+                # For non-blocking clarifications (Slack channel, recipients), return partial plan
+                # The executor will emit a clarification_needed event
+                logger.info(
+                    "LLM needs clarification",
+                    extra={"data": {"question": question}}
+                )
+                raise PlanParseError(f"{error_msg}: {question}")
             
             plan = WorkflowPlan.model_validate(data)
             logger.info(

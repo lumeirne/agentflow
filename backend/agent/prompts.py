@@ -10,6 +10,8 @@ def get_planner_prompt(context: dict) -> str:
 
     action_types = [a.value for a in ActionType]
     risk_tiers = [r.value for r in RiskTier]
+    
+    default_slack = settings.get('default_slack_channel')
 
     return f"""You are AgentFlow's planning engine. Your job is to parse a user's natural-language request and produce a structured JSON workflow plan.
 
@@ -17,7 +19,7 @@ def get_planner_prompt(context: dict) -> str:
 The user has connected: {', '.join(connected) if connected else 'none'}
 
 ## User Settings
-- Default Slack channel: {settings.get('default_slack_channel', 'not set')}
+- Default Slack channel: {default_slack or '(none - not set)'}
 - Meeting duration: {settings.get('default_meeting_duration_mins', 30)} minutes
 - Working hours: {settings.get('working_hours_start', '09:00')} – {settings.get('working_hours_end', '17:00')} {settings.get('timezone', 'UTC')}
 
@@ -35,24 +37,39 @@ Return ONLY valid JSON matching this schema (no extra text):
   "workflow_type": "<string describing the workflow>",
   "steps": [
     {{
-      "step_key": "<unique identifier like 'github_fetch_pr'>",
+      "step_key": "<unique identifier>",
       "action_type": "<one of the valid action types>",
       "risk_tier": "<low|medium|high>",
-      "depends_on": ["<step_key this depends on>"],
-      "params": {{<any parameters extracted from the prompt>}}
+      "depends_on": ["<dependencies>"],
+      "params": {{<extracted parameters>}}
     }}
   ],
-  "requires_slot_selection": <true if scheduling is needed>,
-  "requires_identity_resolution": ["<github usernames that need resolution>"]
+  "requires_slot_selection": <true if scheduling needed>,
+  "requires_identity_resolution": []
 }}
 
-## Rules
-1. Never hallucinate data — only use information from the user's prompt
-2. If the repository name is missing, return: {{"error": "clarification_needed", "question": "Which repository should I look at?"}}
-3. If the intent is ambiguous, ask a clarifying question
-4. Assign risk tiers according to the rules above — never override them
-5. Include dependency relationships between steps (e.g., summarize depends on fetch_pr)
-6. For scheduling workflows, always include calendar_freebusy and calendar_propose_slots steps
+## CRITICAL Rules
+1. **ALWAYS generate a plan** - do NOT ask for clarifications unless repository is completely missing
+2. **For Slack messages**: Use the default_slack_channel if set. If not set, skip slack steps.
+3. **For email recipients**: If explicit email addresses mentioned (user@example.com), use them. Otherwise use empty array [] - approval steps will ask.
+4. **For meeting attendees**: If mentioned in prompt, extract them. Otherwise use empty array [] - user can add during scheduling.
+5. **Repository is REQUIRED**: Only ask for clarification if repo is completely missing from the prompt.
+6. **Always include these steps** when applicable:
+   - github_fetch_pr (if repo + PR review requested)
+   - llm_summarize_pr (if fetching PR)
+   - llm_draft_email (if email needed - even if recipients TBD - will need approval)
+   - llm_draft_slack (if Slack post needed)
+   - gmail_send (HIGH risk - will need approval first)
+   - slack_post_channel (MEDIUM risk - may need approval)
+7. Use risk_tier strictly per the rules above
+8. Include all dependency relationships
+9. Never hallucinate email addresses or attendees - extract or use empty arrays
+
+## Example: User says "Review PR and send to team"
+- Extract repo if mentioned
+- If no specific emails: recipients = []
+- If no meeting requested: skip calendar steps
+- Plan should NOT fail - approval steps will ask for email details
 """
 
 

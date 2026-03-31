@@ -4,11 +4,12 @@
  * Auth0 redirects here after the user authenticates with a social provider.
  * This route:
  *   1. Completes the Auth0 code exchange
- *   2. Notifies the backend to store connection metadata (no tokens)
- *   3. If state=run:<runId> is present, redirects back to the run page
+ *   2. Extracts the idp_sub from the id_token (provider's Auth0 ID)
+ *   3. Calls the backend to verify and link the identity
+ *   4. If state=run:<runId> is present, redirects back to the run page
  *      with ?connected=<provider>&resume=<runId> so the run page can
  *      auto-trigger the resume endpoint.
- *   4. Otherwise redirects to /connections with success indicator.
+ *   5. Otherwise redirects to /connections with success indicator.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { auth0 } from "@/lib/auth0";
@@ -75,6 +76,7 @@ export async function GET(
           while (normalizedB64.length % 4 !== 0) normalizedB64 += "=";
           const payload = JSON.parse(atob(normalizedB64));
           idpSub = payload.sub;
+          console.log(`[callback] Extracted idp_sub for ${provider}:`, idpSub);
         } catch (e) {
           console.error("[callback] Failed to parse id_token", e);
         }
@@ -86,11 +88,12 @@ export async function GET(
     console.error(`[callback] Code exchange error:`, err);
   }
 
-  // ── Notify backend to store connection metadata ───────────────────────────
+  // ── Notify backend to verify and link identity ────────────────────────────
+  let backendError: string | null = null;
   try {
     const { token: appToken } = await auth0.getAccessToken();
     if (appToken) {
-      await fetch(`${API_BASE}/api/connections/${provider}/callback`, {
+      const backendResponse = await fetch(`${API_BASE}/api/connections/${provider}/callback`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${appToken}`,
@@ -98,9 +101,16 @@ export async function GET(
         },
         body: JSON.stringify({ idp_sub: idpSub }),
       });
+
+      if (!backendResponse.ok) {
+        const errorData = await backendResponse.json().catch(() => ({}));
+        backendError = errorData.detail || `Backend returned ${backendResponse.status}`;
+        console.error("[callback] Backend connection error:", backendError);
+      }
     }
   } catch (err) {
     console.error("[callback] Backend notification error:", err);
+    backendError = String(err);
   }
 
   // ── Redirect ──────────────────────────────────────────────────────────────
@@ -109,10 +119,16 @@ export async function GET(
     const redirectUrl = new URL(`/runs/${returnToRunId}`, req.url);
     redirectUrl.searchParams.set("connected", provider);
     redirectUrl.searchParams.set("resume", returnToRunId);
+    if (backendError) {
+      redirectUrl.searchParams.set("connection_warning", backendError);
+    }
     return NextResponse.redirect(redirectUrl);
   }
 
   const redirectUrl = new URL("/connections", req.url);
   redirectUrl.searchParams.set("connected", provider);
+  if (backendError) {
+    redirectUrl.searchParams.set("warning", backendError);
+  }
   return NextResponse.redirect(redirectUrl);
 }

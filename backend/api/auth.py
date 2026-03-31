@@ -105,7 +105,7 @@ async def connection_callback(
     body: Optional[dict[str, Any]] = Body(default=None),
 ):
     """
-    Mark a provider as connected.
+    Mark a provider as connected and link the identity to the user's account.
 
     Stores only connection metadata (status, external_account_id) — never
     provider access tokens. Tokens are retrieved on-demand from Auth0 Token Vault.
@@ -116,6 +116,7 @@ async def connection_callback(
             "data": {
                 "provider": provider,
                 "user_id": current_user.id,
+                "auth0_user_id": current_user.auth0_user_id,
                 "has_body": bool(body),
                 "token_source": "auth0_token_vault",
             }
@@ -128,7 +129,50 @@ async def connection_callback(
     if body:
         idp_sub = body.get("idp_sub")
 
-    # Persist metadata only — no token storage
+    # ── STEP 1: Link the secondary account to primary account ──────────────
+    # This is critical: Auth0's /authorize doesn't auto-link, so we must do it
+    link_succeeded = False
+    if idp_sub:
+        logger.info(
+            "Attempting to link secondary identity to primary account",
+            extra={
+                "data": {
+                    "provider": provider,
+                    "primary_user_id": current_user.auth0_user_id,
+                    "secondary_user_id": idp_sub,
+                }
+            },
+        )
+
+        link_succeeded = await token_vault_client.link_accounts(
+            primary_user_id=current_user.auth0_user_id,
+            secondary_provider=provider,
+            secondary_user_id=idp_sub,
+        )
+
+        if link_succeeded:
+            logger.info(
+                "Account link succeeded - identity should now be accessible",
+                extra={
+                    "data": {
+                        "provider": provider,
+                        "primary_user_id": current_user.auth0_user_id,
+                        "secondary_user_id": idp_sub,
+                    }
+                },
+            )
+        else:
+            logger.warning(
+                "Account link failed - connection will be stored but tokens may not work",
+                extra={
+                    "data": {
+                        "provider": provider,
+                        "primary_user_id": current_user.auth0_user_id,
+                    }
+                },
+            )
+
+    # ── STEP 2: Store connection metadata (regardless of linking status) ───
     await token_vault_client.store_connection_metadata(
         db=db,
         user_id=current_user.id,
@@ -141,11 +185,27 @@ async def connection_callback(
             "data": {
                 "provider": provider,
                 "user_id": current_user.id,
+                "link_succeeded": link_succeeded,
                 "token_source": "auth0_token_vault",
             }
         },
     )
-    return {"status": "connected", "provider": provider}
+
+    # ── STEP 3: Return status based on linking result ──────────────────────
+    if link_succeeded:
+        return {
+            "status": "connected",
+            "provider": provider,
+            "linked": True,
+            "message": f"{provider} identity has been linked to your account",
+        }
+    else:
+        return {
+            "status": "connected",
+            "provider": provider,
+            "linked": False,
+            "message": f"{provider} connection stored - if tokens don't work, try reconnecting",
+        }
 
 
 @router.delete("/connections/{provider}", status_code=status.HTTP_204_NO_CONTENT)

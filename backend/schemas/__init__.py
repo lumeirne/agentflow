@@ -89,6 +89,14 @@ class WorkflowPlan(BaseModel):
     requires_identity_resolution: list[str] = Field(default_factory=list)
 
 
+class ClarificationRequest(BaseModel):
+    """Sent when the planner needs user input to continue."""
+    type: str  # "clarification"
+    message: str  # User-friendly question
+    questions: list[dict[str, Any]]  # [{"field": "slack_channel", "label": "Slack Channel", "type": "select", "options": [...]}]
+    run_id: str | None = None  # For resuming after response
+
+
 # ──────────────────────────────────────────────
 # API request / response schemas
 # ──────────────────────────────────────────────

@@ -107,9 +107,27 @@ async def execute_run(run_id: str) -> None:
                     logger.info("Plan generated", extra={"data": {"run_id": run_id, "step_count": len(plan.steps)}})
 
                 except PlanParseError as e:
-                    logger.error("Plan generation failed", extra={"data": {"run_id": run_id, "error": str(e)}})
-                    await service.update_run_status(run_id, RunStatus.FAILED.value, result_summary=str(e))
-                    await _broadcast(run_id, "error", data={"message": str(e)})
+                    error_msg = str(e)
+                    
+                    # Parse clarification requests and emit user-friendly events
+                    if "clarification_needed" in error_msg.lower():
+                        logger.warning(
+                            "Plan generation needs clarification",
+                            extra={"data": {"run_id": run_id, "clarification": error_msg}}
+                        )
+                        # Format clarification question for frontend
+                        question = error_msg.replace("Failed to parse workflow plan: clarification_needed: ", "")
+                        await service.update_run_status(run_id, RunStatus.FAILED.value, result_summary=f"Missing information: {question}")
+                        await _broadcast(run_id, "clarification_needed", data={
+                            "message": question,
+                            "action": "Please provide the missing information or adjust your request"
+                        })
+                    else:
+                        # Other planning errors
+                        logger.error("Plan generation failed", extra={"data": {"run_id": run_id, "error": error_msg}})
+                        await service.update_run_status(run_id, RunStatus.FAILED.value, result_summary=error_msg)
+                        await _broadcast(run_id, "error", data={"message": error_msg})
+                    
                     await db.commit()
                     return
 

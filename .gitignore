@@ -16,4 +16,8 @@ node_modules
 AGENTS.md
 CLAUDE.md
 venv
-
+*_plan.md
+*_SUMMARY.md
+TROUBLESHOOTING*.md
+*_NOTES.md
+*.db
